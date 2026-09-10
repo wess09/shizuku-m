@@ -25,6 +25,8 @@ import rikka.lifecycle.Status
 import rikka.lifecycle.viewModels
 import rikka.shizuku.Shizuku
 import java.net.ConnectException
+import java.net.InetSocketAddress
+import java.net.Socket
 import javax.net.ssl.SSLProtocolException
 
 private class NotRootedException : Exception()
@@ -185,17 +187,6 @@ private class ViewModel(context: Context, root: Boolean, host: String?, port: In
                     postResult()
                 }
 
-                // [shizuku-m] Pin adbd to a fixed TCP port so that the starter can be
-                // relaunched later over 127.0.0.1:5555 without Wi-Fi / mDNS.
-                runCatching {
-                    shellCommand("setprop service.adb.tcp.port 5555", null)
-                    sb.append('\n').append("[shizuku-m] ADB TCP port pinned to 5555 for offline start").append('\n')
-                    postResult()
-                }.onFailure {
-                    sb.append('\n').append("[shizuku-m] Failed to pin ADB TCP port: ${it.message}").append('\n')
-                    postResult()
-                }
-
                 close()
             }.onFailure {
                 it.printStackTrace()
@@ -204,10 +195,41 @@ private class ViewModel(context: Context, root: Boolean, host: String?, port: In
                 postResult(it)
             }
 
-            // [shizuku-m] Pre-authorize the embedded key against the legacy listener on
-            // 127.0.0.1:5555, so future offline starts do not show the RSA dialog again.
+            // [shizuku-m] Pin adbd to fixed TCP port 5555 via adbd's built-in tcpip service,
+            // then pre-authorize the embedded key against the legacy listener so future
+            // offline starts do not show the RSA dialog again.
+            // (SELinux denies shell writing service.adb.tcp.port on modern devices;
+            // the tcpip ADB service is handled by adbd itself and works everywhere.)
             if ((host != "127.0.0.1" && host != "localhost") || port != 5555) {
-                sb.append('\n').append("[shizuku-m] Authorizing offline access on 127.0.0.1:5555 ...").append('\n')
+                runCatching {
+                    AdbClient(host, port, key, 10_000).use {
+                        it.connect()
+                        it.tcpipCommand(5555)
+                    }
+                }
+
+                var pinned = false
+                for (attempt in 1..10) {
+                    pinned = runCatching {
+                        Socket().use { it.connect(InetSocketAddress("127.0.0.1", 5555), 500) }
+                        true
+                    }.getOrDefault(false)
+                    if (pinned) break
+                    try {
+                        Thread.sleep(500)
+                    } catch (ignored: InterruptedException) {
+                    }
+                }
+
+                if (!pinned) {
+                    sb.append('\n').append("[shizuku-m] Failed to pin ADB TCP port 5555").append('\n')
+                    postResult()
+                    return@launch
+                }
+                sb.append('\n').append("[shizuku-m] ADB TCP port pinned to 5555 for offline start").append('\n')
+                postResult()
+
+                sb.append("[shizuku-m] Authorizing offline access on 127.0.0.1:5555 ...").append('\n')
                     .append("[shizuku-m] If a 'Allow USB debugging' dialog appears, check 'Always allow' and confirm.").append('\n')
                 postResult()
 

@@ -81,9 +81,15 @@ class AdbClient(private val host: String, private val port: Int, private val key
         if (message.command != A_CNXN) error("not A_CNXN")
     }
 
-    fun shellCommand(command: String, listener: ((ByteArray) -> Unit)?) {
+    fun shellCommand(command: String, listener: ((ByteArray) -> Unit)?) = runService("shell:$command", listener)
+
+    // [shizuku-m] adbd's built-in tcpip service pins the TCP listener without shell setprop
+    // (SELinux denies shell writing service.adb.tcp.port = adbd_config_prop on modern devices)
+    fun tcpipCommand(port: Int) = runService("tcpip:$port", null)
+
+    private fun runService(service: String, listener: ((ByteArray) -> Unit)?) {
         val localId = 1
-        write(A_OPEN, localId, 0, "shell:$command")
+        write(A_OPEN, localId, 0, service)
 
         var message = read()
         when (message.command) {

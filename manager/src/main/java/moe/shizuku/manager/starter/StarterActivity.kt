@@ -184,12 +184,56 @@ private class ViewModel(context: Context, root: Boolean, host: String?, port: In
                     sb.append(String(it))
                     postResult()
                 }
+
+                // [shizuku-m] Pin adbd to a fixed TCP port so that the starter can be
+                // relaunched later over 127.0.0.1:5555 without Wi-Fi / mDNS.
+                runCatching {
+                    shellCommand("setprop service.adb.tcp.port 5555", null)
+                    sb.append('\n').append("[shizuku-m] ADB TCP port pinned to 5555 for offline start").append('\n')
+                    postResult()
+                }.onFailure {
+                    sb.append('\n').append("[shizuku-m] Failed to pin ADB TCP port: ${it.message}").append('\n')
+                    postResult()
+                }
+
                 close()
             }.onFailure {
                 it.printStackTrace()
 
                 sb.append('\n').append(Log.getStackTraceString(it))
                 postResult(it)
+            }
+
+            // [shizuku-m] Pre-authorize the embedded key against the legacy listener on
+            // 127.0.0.1:5555, so future offline starts do not show the RSA dialog again.
+            if ((host != "127.0.0.1" && host != "localhost") || port != 5555) {
+                sb.append('\n').append("[shizuku-m] Authorizing offline access on 127.0.0.1:5555 ...").append('\n')
+                    .append("[shizuku-m] If a 'Allow USB debugging' dialog appears, check 'Always allow' and confirm.").append('\n')
+                postResult()
+
+                var authorized = false
+                var lastError: Throwable? = null
+                for (attempt in 1..3) {
+                    try {
+                        AdbClient("127.0.0.1", 5555, key, 30_000).use { it.connect() }
+                        authorized = true
+                        break
+                    } catch (e: Throwable) {
+                        lastError = e
+                        try {
+                            Thread.sleep(1000)
+                        } catch (ignored: InterruptedException) {
+                        }
+                    }
+                }
+                if (authorized) {
+                    sb.append("[shizuku-m] Offline access authorized").append('\n')
+                } else {
+                    lastError?.printStackTrace()
+                    sb.append("[shizuku-m] Offline authorization not completed: ${lastError?.message}").append('\n')
+                        .append("[shizuku-m] The first offline start may still show the authorization dialog.").append('\n')
+                }
+                postResult()
             }
         }
     }

@@ -26,7 +26,7 @@ import javax.net.ssl.SSLSocket
 
 private const val TAG = "AdbClient"
 
-class AdbClient(private val host: String, private val port: Int, private val key: AdbKey) : Closeable {
+class AdbClient(private val host: String, private val port: Int, private val key: AdbKey, private val timeoutMs: Int = 0) : Closeable {
 
     private lateinit var socket: Socket
     private lateinit var plainInputStream: DataInputStream
@@ -44,6 +44,7 @@ class AdbClient(private val host: String, private val port: Int, private val key
     fun connect() {
         socket = Socket(host, port)
         socket.tcpNoDelay = true
+        if (timeoutMs > 0) socket.soTimeout = timeoutMs
         plainInputStream = DataInputStream(socket.getInputStream())
         plainOutputStream = DataOutputStream(socket.getOutputStream())
 

@@ -57,4 +57,10 @@
         android:text="@string/home_root_button_start"
         app:icon="@drawable/ic_server_start_24dp" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_offline"
+        style="@style/CardButton"
+        android:text="@string/offline_start_button"
+        app:icon="@drawable/ic_baseline_offline_bolt_24" />
+
 </LinearLayout>

@@ -87,7 +87,9 @@ materialThemeBuilder {
 }
 
 def collapseReleaseResourceNames = task('collapseReleaseResourceNames').doLast {
-    def aapt2 = Paths.get(project.android.sdkDirectory.path, 'build-tools', project.android.buildToolsVersion, 'aapt2')
+    def aapt2 = Paths.get(project.android.sdkDirectory.path, 'build-tools', project.android.buildToolsVersion,
+            // [shizuku-m] Windows needs the .exe suffix for commandLine to find the binary
+            org.apache.tools.ant.taskdefs.condition.Os.isFamily(org.apache.tools.ant.taskdefs.condition.Os.FAMILY_WINDOWS) ? 'aapt2.exe' : 'aapt2')
     def zip = Paths.get(project.buildDir.path, 'intermediates',
             'optimized_processed_res', 'release', 'optimizeReleaseResources', 'resources-release-optimize.ap_')
     def optimized = new File("${zip}.opt")

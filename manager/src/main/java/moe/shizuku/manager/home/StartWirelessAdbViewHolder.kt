@@ -8,6 +8,7 @@ import android.text.method.LinkMovementMethod
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
@@ -25,6 +26,8 @@ import rikka.html.text.HtmlCompat
 import rikka.recyclerview.BaseViewHolder
 import rikka.recyclerview.BaseViewHolder.Creator
 import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.Socket
 
 class StartWirelessAdbViewHolder(binding: HomeStartWirelessAdbBinding, root: View) :
     BaseViewHolder<Any?>(root) {
@@ -40,6 +43,11 @@ class StartWirelessAdbViewHolder(binding: HomeStartWirelessAdbBinding, root: Vie
     init {
         binding.button1.setOnClickListener { v: View ->
             onAdbClicked(v.context)
+        }
+
+        // [shizuku-m] Explicit offline entry: probe the pinned local port and start directly
+        binding.buttonOffline.setOnClickListener { v: View ->
+            onOfflineClicked(v.context)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -64,7 +72,16 @@ class StartWirelessAdbViewHolder(binding: HomeStartWirelessAdbBinding, root: Vie
         super.onBind(payloads)
     }
 
-    private fun onAdbClicked(context: Context) {
+    private fun startWithLoopbackPort(context: Context, port: Int) {
+        val intent = Intent(context, StarterActivity::class.java).apply {
+            putExtra(StarterActivity.EXTRA_IS_ROOT, false)
+            putExtra(StarterActivity.EXTRA_HOST, "127.0.0.1")
+            putExtra(StarterActivity.EXTRA_PORT, port)
+        }
+        context.startActivity(intent)
+    }
+
+    private fun showNativeStartFlow(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             AdbDialogFragment().show(context.asActivity<FragmentActivity>().supportFragmentManager)
             return
@@ -72,16 +89,66 @@ class StartWirelessAdbViewHolder(binding: HomeStartWirelessAdbBinding, root: Vie
 
         val port = EnvironmentUtils.getAdbTcpPort()
         if (port > 0) {
-            val host = "127.0.0.1"
-            val intent = Intent(context, StarterActivity::class.java).apply {
-                putExtra(StarterActivity.EXTRA_IS_ROOT, false)
-                putExtra(StarterActivity.EXTRA_HOST, host)
-                putExtra(StarterActivity.EXTRA_PORT, port)
-            }
-            context.startActivity(intent)
+            startWithLoopbackPort(context, port)
         } else {
             WadbNotEnabledDialogFragment().show(context.asActivity<FragmentActivity>().supportFragmentManager)
         }
+    }
+
+    // [shizuku-m] Loopback probe: adbd listening on the pinned port is reachable without any network
+    private fun probeLoopbackPort(port: Int, timeoutMs: Int = 500): Boolean = runCatching {
+        Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), timeoutMs) }
+        true
+    }.getOrDefault(false)
+
+    private fun onAdbClicked(context: Context) {
+        // [shizuku-m] If a fixed TCP port is pinned, probe it first and start offline directly;
+        // only fall back to the native wireless debugging flow when the port is not alive.
+        val port = EnvironmentUtils.getAdbTcpPort()
+        if (port <= 0) {
+            showNativeStartFlow(context)
+            return
+        }
+
+        Thread {
+            val open = probeLoopbackPort(port)
+            itemView.post {
+                if (open) {
+                    startWithLoopbackPort(context, port)
+                } else {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.offline_start_port_not_ready, port),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    showNativeStartFlow(context)
+                }
+            }
+        }.start()
+    }
+
+    // [shizuku-m] Explicit "offline start" button: never falls back to the wizard, only toasts
+    private fun onOfflineClicked(context: Context) {
+        val port = EnvironmentUtils.getAdbTcpPort()
+        if (port <= 0) {
+            Toast.makeText(context, R.string.offline_start_need_activate, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        Thread {
+            val open = probeLoopbackPort(port)
+            itemView.post {
+                if (open) {
+                    startWithLoopbackPort(context, port)
+                } else {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.offline_start_port_not_ready, port),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }.start()
     }
 
     @RequiresApi(Build.VERSION_CODES.R)

@@ -1,103 +1,118 @@
-# Shizuku
+# Shizuku-m
 
-## Background
+> 官方 Shizuku v13.6.0 的单机**离线自启**魔改版 —— 激活一次后，断网 / 飞行模式下也能一键拉起 Shizuku 服务。
 
-When developing apps that requires root, the most common method is to run some commands in the su shell. For example, there is an app that uses the `pm enable/disable` command to enable/disable components.
+## ⚠️ 写在前面：优先推荐官方版
 
-This method has very big disadvantages:
+日常使用请**优先选择官方项目** [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku)：正式维护、文档齐全、机型适配广，可通过官方渠道（GitHub / Google Play）获取。
 
-1. **Extremely slow** (Multiple process creation)
-2. Needs to process texts (**Super unreliable**)
-3. The possibility is limited to available commands
-4. Even if ADB has sufficient permissions, the app requires root privileges to run
+本项目只是个人学习用途的魔改，**仅当你确实被官方版的启动方式困扰**（每次都要联网、开无线调试、走配对向导）、官方版对你实在不便时，再考虑下载本项目。另外本项目目前只在一台设备上实测过（见文末「测试机型」），其他机型不保证可用，请知悉风险。
 
-Shizuku uses a completely different way. See detailed description below.
+## 和官方版有什么区别？
 
-## User guide & Download
+| | 官方 Shizuku | Shizuku-m |
+| :--- | :--- | :--- |
+| 无线调试启动 | 每次都要开 WLAN、开无线调试、配对 | **激活一次后，断网也能直接拉起** |
+| 端口 | 系统每次随机分配 | 激活时自动钉死 **5555** 并完成预授权 |
+| 启动方式 | 必须走完整向导 | 「启动」静默探测直连 + 专用「**离线自连**」按钮 |
+| 图标 / 名称 | Shizuku | **Shizuku-m**（图标带红色 M 角标） |
 
-<https://shizuku.rikka.app/>
+原理简述：常规启动成功后，魔改钩子通过 adbd 内置 `tcpip:5555` 服务把 ADB TCP 端口固定在 5555，并自动回环连接完成 RSA 预授权。之后即使完全断网，本机回环（127.0.0.1:5555）仍然可达，直接直连即可拉起服务。
 
-## How does Shizuku work?
+## 安装
 
-First, we need to talk about how app use system APIs. For example, if the app wants to get installed apps, we all know we should use `PackageManager#getInstalledPackages()`. This is actually an interprocess communication (IPC) process of the app process and system server process, just the Android framework did the inner works for us.
+### 第 1 步：卸载官方版（没装过可跳过）
 
-Android uses `binder` to do this type of IPC. `Binder` allows the server-side to learn the uid and pid of the client-side, so that the system server can check if the app has the permission to do the operation.
+Shizuku-m 与官方版包名相同（`moe.shizuku.privileged.api`），**不能共存**，任选一种方式卸载：
 
-Usually, if there is a "manager" (e.g., `PackageManager`) for apps to use, there should be a "service" (e.g., `PackageManagerService`) in the system server process. We can simply think if the app holds the `binder` of the "service", it can communicate with the "service". The app process will receive binders of system services on start.
+- 长按桌面的 Shizuku 图标 →「卸载」；
+- 或 设置 → 应用 → 应用管理 → Shizuku → 卸载。
 
-Shizuku guides users to run a process, Shizuku server, with root or ADB first. When the app starts, the `binder` to Shizuku server will also be sent to the app.
+### 第 2 步：安装 Shizuku-m
 
-The most important feature Shizuku provides is something like be a middle man to receive requests from the app, sent them to the system server, and send back the results. You can see the `transactRemote` method in `rikka.shizuku.server.ShizukuService` class, and `moe.shizuku.api.ShizukuBinderWrapper` class for the detail.
+1. 从 [Releases](https://github.com/Shinarin/shizuku-m/releases) 页下载最新 APK（`shizuku-m-v*-release.apk`）到手机；
+2. 在文件管理器里点开该 APK →「安装」；
+   - 若提示「禁止安装未知来源的应用」，按系统指引允许当前来源后重试；
+3. 装好后应用名为 **Shizuku-m**，图标右上角有红色 M 角标，和官方版一眼区分。
 
-So, we reached our goal, to use system APIs with higher permission. And to the app, it is almost identical to the use of system APIs directly.
+### 以后升级
 
-## Developer guide
+从 Releases 下载新版 APK 覆盖安装即可（同一自签名密钥，无需先卸载）。
 
-### API & sample
+## 使用
 
-https://github.com/RikkaApps/Shizuku-API
+整体节奏：**每次开机后先做一次「在线激活」**，之后本次开机周期内，断网也能随时「离线自连」。
 
-### Migrating from pre-v11
+### 前置准备（仅需一次）：开启开发者选项
 
-> Existing applications still works, of course.
+1. 设置 → 关于手机 → 连续点击「版本号」7 次，直到提示「已开启开发者模式」（部分机型需输入锁屏密码）；
+2. 回到设置，进入「开发者选项」（一般在 系统和更新 / 更多设置 里，也可在设置里直接搜索）。
 
-https://github.com/RikkaApps/Shizuku-API#migration-guide-for-existing-applications-use-shizuku-pre-v11
+### ① 在线激活（每次开机后做一次）
 
-### Attention
+1. 连上任意 Wi-Fi 或热点（不需要能上网，只要 WLAN 处于开启并连接状态）；
+2. 开发者选项 → 打开「**无线调试**」；
+3. 打开 Shizuku-m，点首页「**启动**」；
+4. **首次激活**会走一次系统配对向导（之后重启一般无需重新配对）：
+   1. 点向导里的「配对」，按提示进入 开发者选项 → 无线调试 →「使用配对码配对设备」，屏幕会显示 6 位配对码；
+   2. 下拉通知栏，找到 Shizuku 发来的配对通知，把 6 位配对码填进去，提示「配对成功」；
+   3. 返回 Shizuku-m，再点一次「启动」。
+5. 启动成功的瞬间，系统可能弹出「**允许 USB 调试吗？**」—— 这是魔改钩子在做回环预授权，**勾选「一律允许使用这台计算机进行调试」**再点「确定」。
+   - 手滑点了「取消」：到 开发者选项 →「撤销 USB 调试授权」，然后从第 3 步重做一遍。
 
-1. ADB permissions are limited
+✅ **激活成功的标志**：首页显示「Shizuku 正在运行」。此时钩子已自动钉死 5555 端口并完成预授权，无需任何额外操作。
 
-   ADB has limited permissions and different on various system versions. You can see permissions granted to ADB [here](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/packages/Shell/AndroidManifest.xml).
+### ② 离线自连（激活之后随便用）
 
-   Before calling the API, you can use `ShizukuService#getUid` to check if Shizuku is running user ADB, or use `ShizukuService#checkPermission` to check if the server has sufficient permissions.
+1. 关掉 Wi-Fi，或直接开飞行模式；
+2. 打开 Shizuku-m，点「**离线自连**」—— 约 1 秒内拉起，首页显示「Shizuku 正在运行」；
+3. 之后其它依赖 Shizuku 的 App 即可正常使用。
 
-2. Hidden API limitation from Android 9
+也可以直接点「启动」：它会先花约 0.5 秒静默探测本机 5555 端口 —— 活着就直接连上、不弹向导；探测失败则 Toast 提示并回退到常规向导（说明需要重新在线激活）。
 
-   As of Android 9, the usage of the hidden APIs is limited for normal apps. Please use other methods (such as <https://github.com/LSPosed/AndroidHiddenApiBypass>).
+### 常见场景速查
 
-3. Android 8.0 & ADB
+| 场景 | 该做什么 |
+| :--- | :--- |
+| 刚重启手机 | 连网 → 开无线调试 → 点「启动」做一次在线激活 |
+| 激活后想断网使用 | 直接点「离线自连」 |
+| Shizuku 进程被系统杀掉 | 直接点「离线自连」（或「启动」）重新拉起 |
+| 点「离线自连」提示尚未激活 | 说明没激活过或刚重启，连网走一遍「启动」 |
 
-   At present, the way Shizuku service gets the app process is to combine `IActivityManager#registerProcessObserver` and `IActivityManager#registerUidObserver` (26+) to ensure that the app process will be sent when the app starts. However, on API 26, ADB lacks permissions to use `registerUidObserver`, so if you need to use Shizuku in a process that might not be started by an Activity, it is recommended to trigger the send binder by starting a transparent activity.
+## 常见问题
 
-4. Direct use of `transactRemote` requires attention
+**Q：重启手机后离线自连没反应？**
+A：5555 端口不跨重启（系统限制，`service.adb.tcp.port` 重启即清空，且已实测非 root 无法持久化）。重启后需要重新做一遍「在线激活」，之后本次开机周期内又可离线自连。
 
-   * The API may be different under different Android versions, please be sure to check it carefully. Also, the `android.app.IActivityManager` has the aidl form in API 26 and later, and `android.app.IActivityManager$Stub` exists only on API 26.
+**Q：离线自连提示「尚未激活 / 端口未就绪」？**
+A：说明本机还没激活过（或刚重启）。连网走一遍「启动」即可。
 
-   * `SystemServiceHelper.getTransactionCode` may not get the correct transaction code, such as `android.content.pm.IPackageManager$Stub.TRANSACTION_getInstalledPackages` does not exist on API 25 and there is `android.content.pm.IPackageManager$Stub.TRANSACTION_getInstalledPackages_47` (this situation has been dealt with, but it is not excluded that there may be other circumstances). This problem is not encountered with the `ShizukuBinderWrapper` method.
+**Q：安全吗？5555 会不会被别人连？**
+A：5555 监听全接口是 adbd 的限制（无法只绑回环），但 ADB 协议本身有 RSA 密钥认证兜底，陌生电脑连不进来，最多触发一次授权弹窗 —— 在不可信网络里**不要**对陌生电脑点「允许」即可。
 
-## Developing Shizuku itself
+**Q：能换回官方版吗？**
+A：随时卸载 Shizuku-m、装回官方版即可，互不影响数据（Shizuku 本身无用户数据）。
 
-### Build
+## 测试机型
 
-- Clone with `git clone --recurse-submodules`
-- Run gradle task `:manager:assembleDebug` or `:manager:assembleRelease`
+本项目**暂时只在以下机型上测试过**，其他机型 / 系统版本尚未验证，不保证可用：
 
-The `:manager:assembleDebug` task generates a debuggable server. You can attach a debugger to `shizuku_server` to debug the server. Be aware that, in Android Studio, "Run/Debug configurations" - "Always install with package manager" should be checked, so that the server will use the latest code.
+| 机型 | 型号 | 系统环境 | 测试结果 |
+| :--- | :--- | :--- | :--- |
+| 荣耀 GT Pro | PPG-AN00 | Android 16 / MagicOS，SELinux Enforcing | ✅ 全流程实测通过（在线激活 + 断网离线自连） |
 
-## License
+如果你在其他机型上试过（无论成功还是翻车），欢迎提 Issue 反馈补充。
 
-The code for this project is available under the Apache-2.0 license.
+## 仓库说明
 
-### Exceptions
+本仓库 fork 自 [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku)，魔改全部集中在 `manager` 模块的 3 个 `[shizuku-m]` 提交中：
 
-* You are **FORBIDDEN** to use image files listed below in any way (unless for displaying Shizuku itself).
+| 内容 | 位置 |
+| :--- | :--- |
+| 魔改版安装包 | [Releases](https://github.com/Shinarin/shizuku-m/releases) 页下载 |
+| 魔改技术说明（改了哪些文件、为什么） | [SHIZUKU-M.md](SHIZUKU-M.md) |
+| 更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 
-  ```
-  manager/src/main/res/mipmap-hdpi/ic_launcher.png
-  manager/src/main/res/mipmap-hdpi/ic_launcher_background.png
-  manager/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
-  manager/src/main/res/mipmap-xhdpi/ic_launcher.png
-  manager/src/main/res/mipmap-xhdpi/ic_launcher_background.png
-  manager/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
-  manager/src/main/res/mipmap-xxhdpi/ic_launcher.png
-  manager/src/main/res/mipmap-xxhdpi/ic_launcher_background.png
-  manager/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
-  manager/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-  manager/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png
-  manager/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
-  ```
+## 许可证
 
-* For the project as a whole, it is not free.
-You are **FORBIDDEN** to distribute the apk compiled by **you**
-(including modified, e.g., rename app name "Shizuku" to something else)
-to any store (IBNLT Google Play Store, F-Droid, Amazon Appstore etc.).
+与上游一致，遵循 [Apache-2.0](LICENSE)。

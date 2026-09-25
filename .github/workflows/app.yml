@@ -5,6 +5,10 @@ on:
     branches: [ master ]
     paths-ignore:
       - '.github/ISSUE_TEMPLATE'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -21,8 +25,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+      # 没有 signing.properties 时 signing.gradle 会回落到 runner 的 debug keystore，
+      # 而 debug keystore 每台机器都不一样，会导致前后两次构建签名不一致、无法覆盖安装。
+      # 所以这里始终写入固定的 release 密钥。
       - name: Write key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: github.event_name != 'pull_request'
         run: |
           echo KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} > signing.properties
           echo KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }} >> signing.properties
@@ -31,13 +38,8 @@ jobs:
           echo ${{ secrets.KEYSTORE }} | base64 --decode > key.jks
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          dependency-graph: generate-and-submit
-          build-scan-publish: true
-          build-scan-terms-of-use-url: "https://gradle.com/terms-of-service"
-          build-scan-terms-of-use-agree: "yes"
       - name: Build with Gradle
-        id: buildWithGradle
+        id: build
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
           echo 'android.sdk.channel=3' >> gradle.properties
@@ -45,11 +47,53 @@ jobs:
           echo 'org.gradle.caching=true' >> gradle.properties
           echo 'org.gradle.parallel=true' >> gradle.properties
           ./gradlew :manager:assemble
-          releaseName=`ls manager/build/outputs/apk/release/shizuku*-v*-release.apk | awk -F '(/|-release.apk)' '{print $6}'` && echo "releaseName=$releaseName" >> $GITHUB_OUTPUT
-      - name: Upload release
+          apk=$(ls manager/build/outputs/apk/release/*.apk | head -1)
+          version=$(basename "$apk" | sed -E 's/^shizuku-v(.*)-release\.apk$/\1/')
+          echo "apk=$apk" >> $GITHUB_OUTPUT
+          echo "version=$version" >> $GITHUB_OUTPUT
+      - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.buildWithGradle.outputs.releaseName }}
+          name: ${{ steps.build.outputs.version }}
           path: "manager/build/outputs"
           compression-level: 9
+      # 发布成 Release：artifact 下载要登录，用户直接装的话必须有公开直链。
+      # 失败不影响构建结果，产物仍留在 artifact 里。
+      - name: Publish release
+        if: success() && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.build.outputs.version }}
+          name: Shizuku-m ${{ steps.build.outputs.version }}
+          body: |
+            Shizuku-m，基于上游 Shizuku 13.6.0（commit `${{ github.sha }}`），
+            并修复了**联发科（MediaTek）设备上用户服务无法启动**的问题。
+
+            ### 修了什么
+
+            Shizuku 13.6 起改用 `Application` 初始化特权用户服务进程，使得
+            `LoadedApk.makeApplication()` 会在一个由 Shizuku 拉起、而非
+            ActivityManagerService 绑定的进程里执行。部分 ROM 在该函数里注入了假定
+            「正常应用进程」的代码并因此抛异常：
+
+            - **联发科**：`ResOptExt` 的资源预加载会解引用
+              `Application.getProcessName()`，在没有 AppBindData 时为 null → NPE。
+              （[RikkaApps/Shizuku#1198](https://github.com/RikkaApps/Shizuku/issues/1198)）
+            - **其他 ROM**：带 per-domain 规则的网络安全配置会在
+              `NetworkSecurityConfigProvider.handleNewApplication` 里冲突，抛
+              `Found multiple conflicting per-domain rules`。
+              （[RikkaApps/Shizuku#1171](https://github.com/RikkaApps/Shizuku/issues/1171)）
+
+            两者都从同一个调用抛出并导致整个用户服务进程 `System.exit(1)`，表现为
+            Shizuku 已授权、binder 可达，但特权服务永远连接超时。
+
+            修复方式：能拿到 `Application` 就照旧使用，抛异常则回退到 13.6 之前的
+            Context-only 路径，不再因为这一步丢掉整个用户服务。
+
+            ### 安装
+
+            与官方 Shizuku / Shizuku-m 签名不同，首次安装需要先卸载已有的 Shizuku。
+          files: manager/build/outputs/apk/release/*.apk
+          fail_on_unmatched_files: true

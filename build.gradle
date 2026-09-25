@@ -27,7 +27,7 @@ subprojects {
 apply from: 'api/manifest.gradle'
 def gitCommitId = 'git rev-parse --short HEAD'.execute([], project.rootDir).text.trim()
 def gitCommitCount = Integer.parseInt('git rev-list --count HEAD'.execute([], project.rootDir).text.trim())
-def baseVersionName = "${api_version_major}.6.0"
+def baseVersionName = "${api_version_major}.6.0-m2"
 ext {
     versionCode = gitCommitCount
     versionName = "${baseVersionName}.r${gitCommitCount}.${gitCommitId}"
